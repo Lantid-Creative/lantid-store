@@ -873,7 +873,7 @@ export type Database = {
     Enums: {
       app_role: "owner" | "manager" | "cashier"
       payment_method: "cash" | "pos" | "transfer" | "credit" | "split"
-      subscription_plan: "starter" | "business" | "enterprise"
+      subscription_plan: "starter" | "business" | "enterprise" | "biz_pro"
       subscription_status: "active" | "expired" | "cancelled" | "pending"
     }
     CompositeTypes: {
@@ -1004,7 +1004,7 @@ export const Constants = {
     Enums: {
       app_role: ["owner", "manager", "cashier"],
       payment_method: ["cash", "pos", "transfer", "credit", "split"],
-      subscription_plan: ["starter", "business", "enterprise"],
+      subscription_plan: ["starter", "business", "enterprise", "biz_pro"],
       subscription_status: ["active", "expired", "cancelled", "pending"],
     },
   },

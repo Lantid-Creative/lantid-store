@@ -4,14 +4,13 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { Check, Crown, Zap, Building2, Loader2, ExternalLink } from 'lucide-react';
 import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import { getSubscriptionPrice, type BillingCycle } from '../../supabase/functions/_shared/subscription-plans';
 
 const plans = [
   {
     id: 'starter',
     name: 'Starter',
-    monthlyPrice: '₦5,000',
-    yearlyPrice: '₦48,000',
-    yearlySavings: 'Save ₦12,000',
     icon: Zap,
     features: ['1 Store', 'Up to 100 Products', 'Owner Only (No Extra Staff)', 'Basic Reports', 'Email Support'],
     popular: false,
@@ -19,9 +18,6 @@ const plans = [
   {
     id: 'business',
     name: 'Business',
-    monthlyPrice: '₦15,000',
-    yearlyPrice: '₦144,000',
-    yearlySavings: 'Save ₦36,000',
     icon: Crown,
     features: ['1 Store', 'Unlimited Products', '10 Staff Accounts', 'Advanced Reports', 'Priority Support', 'Inventory Alerts'],
     popular: true,
@@ -29,9 +25,6 @@ const plans = [
   {
     id: 'enterprise',
     name: 'Enterprise',
-    monthlyPrice: '₦50,000',
-    yearlyPrice: '₦480,000',
-    yearlySavings: 'Save ₦120,000',
     icon: Building2,
     features: ['Multiple Stores', 'Unlimited Products', 'Unlimited Staff', 'Custom Reports', 'Dedicated Support', 'API Access', 'White Label'],
     popular: false,
@@ -41,7 +34,7 @@ const plans = [
 export default function SubscriptionPage() {
   const { storeId, user, refetchSubscription } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
-  const [billingCycle, setBillingCycle] = useState<'monthly' | 'yearly'>('monthly');
+  const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
 
   const { data: subscription, refetch } = useQuery({
     queryKey: ['subscription', storeId],
@@ -132,33 +125,19 @@ export default function SubscriptionPage() {
     <div className="h-full overflow-y-auto">
       <div className="max-w-5xl mx-auto px-6 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
           <div>
             <h1 className="text-2xl font-bold text-foreground">Subscription</h1>
             <p className="text-muted-foreground mt-1">Manage your store's subscription plan</p>
           </div>
           {/* Billing Toggle */}
           <div className="flex items-center gap-1 p-1 rounded-lg bg-muted">
-            <button
-              onClick={() => setBillingCycle('monthly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                billingCycle === 'monthly'
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Monthly
-            </button>
-            <button
-              onClick={() => setBillingCycle('yearly')}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                billingCycle === 'yearly'
-                  ? 'bg-primary text-primary-foreground shadow-sm'
-                  : 'text-muted-foreground hover:text-foreground'
-              }`}
-            >
-              Yearly
-            </button>
+            {(['monthly', 'six_months', 'yearly'] as const).map((cycle) => (
+              <Button key={cycle} size="sm" variant={billingCycle === cycle ? 'default' : 'ghost'}
+                aria-pressed={billingCycle === cycle} onClick={() => setBillingCycle(cycle)} className="flex-1">
+                {cycle === 'monthly' ? 'Monthly' : cycle === 'six_months' ? '6 Months' : 'Yearly'}
+              </Button>
+            ))}
           </div>
         </div>
 
@@ -187,6 +166,9 @@ export default function SubscriptionPage() {
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {plans.map((plan) => {
             const isCurrent = isActive && currentPlan === plan.id;
+            const price = getSubscriptionPrice(plan.id, billingCycle);
+            const monthlyPrice = getSubscriptionPrice(plan.id, 'monthly') ?? 0;
+            const savings = price === undefined ? 0 : monthlyPrice * (billingCycle === 'yearly' ? 12 : billingCycle === 'six_months' ? 6 : 1) - price;
 
             return (
               <div
@@ -214,15 +196,15 @@ export default function SubscriptionPage() {
 
                 <div className="mb-5">
                   <span className="text-3xl font-extrabold text-foreground">
-                    {billingCycle === 'monthly' ? plan.monthlyPrice : plan.yearlyPrice}
+                    {price === undefined ? 'Not available' : `₦${price.toLocaleString('en-NG')}`}
                   </span>
                   <span className="text-muted-foreground text-sm">
-                    {billingCycle === 'monthly' ? '/month' : '/year'}
+                    {price === undefined ? '' : billingCycle === 'monthly' ? '/month' : billingCycle === 'six_months' ? '/6 months' : '/year'}
                   </span>
-                  {billingCycle === 'yearly' && (
+                  {savings > 0 && (
                     <div className="mt-1">
-                      <span className="text-xs font-semibold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-full">
-                        {plan.yearlySavings}
+                      <span className="text-xs font-semibold text-primary bg-primary/10 px-2 py-0.5 rounded-full">
+                        Save ₦{savings.toLocaleString('en-NG')}
                       </span>
                     </div>
                   )}
@@ -237,9 +219,9 @@ export default function SubscriptionPage() {
                   ))}
                 </ul>
 
-                <button
+                <Button
                   onClick={() => handleSubscribe(plan.id)}
-                  disabled={isCurrent || !!loadingPlan}
+                  disabled={isCurrent || !!loadingPlan || price === undefined}
                   className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                     isCurrent
                       ? 'bg-primary/10 text-primary cursor-default'
@@ -250,6 +232,8 @@ export default function SubscriptionPage() {
                 >
                   {loadingPlan === plan.id ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : price === undefined ? (
+                    'Unavailable for 6 months'
                   ) : isCurrent ? (
                     'Current Plan'
                   ) : (
@@ -257,7 +241,7 @@ export default function SubscriptionPage() {
                       Subscribe <ExternalLink className="h-3.5 w-3.5" />
                     </>
                   )}
-                </button>
+                </Button>
               </div>
             );
           })}

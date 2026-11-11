@@ -1,0 +1,2 @@
+# Architecture rules
+- Use the shared subscription catalog in `supabase/functions/_shared/subscription-plans.ts` for displayed prices, checkout amounts, and billing durations to prevent client/payment drift.

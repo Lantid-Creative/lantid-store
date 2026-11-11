@@ -9,6 +9,7 @@ import {
 import { AnimatedProductTour } from '@/components/AnimatedProductTour';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
+import { SUBSCRIPTION_PRICES } from '../../supabase/functions/_shared/subscription-plans';
 
 const fadeUp = {
   hidden: { opacity: 0, y: 30 },
@@ -389,13 +390,15 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
             {[
               {
-                name: 'Starter', price: '₦5,000', period: '/month',
+                name: 'Starter', price: `₦${SUBSCRIPTION_PRICES.starter.monthly.toLocaleString('en-NG')}`, period: '/month',
+                longerTerms: `6 months: ₦${SUBSCRIPTION_PRICES.starter.six_months.toLocaleString('en-NG')} · Yearly: ₦${SUBSCRIPTION_PRICES.starter.yearly.toLocaleString('en-NG')}`,
                 desc: 'Perfect for single-location stores',
                 features: ['1 Store', 'Owner Only', 'POS & Receipts', 'Basic Analytics', 'Email Support'],
                 popular: false,
               },
               {
-                name: 'Business', price: '₦15,000', period: '/month',
+                name: 'Business', price: `₦${SUBSCRIPTION_PRICES.business.monthly.toLocaleString('en-NG')}`, period: '/month',
+                longerTerms: `6 months: ₦${SUBSCRIPTION_PRICES.business.six_months.toLocaleString('en-NG')} · Yearly: ₦${SUBSCRIPTION_PRICES.business.yearly.toLocaleString('en-NG')}`,
                 desc: 'For growing wholesale businesses',
                 features: ['1 Store', 'Unlimited Staff', 'Full Analytics', 'Inventory Management', 'Priority Support', 'Export Reports'],
                 popular: true,
@@ -430,6 +433,7 @@ export default function LandingPage() {
                 <div className="mt-6 mb-8">
                   <span className="text-4xl font-black text-white font-mono-numbers">{plan.price}</span>
                   <span className="text-sm text-landing-muted">{plan.period}</span>
+                  {plan.longerTerms && <p className="text-sm text-landing-muted mt-3 leading-relaxed">{plan.longerTerms}</p>}
                 </div>
                 <ul className="space-y-3 mb-8">
                   {plan.features.map((f) => (

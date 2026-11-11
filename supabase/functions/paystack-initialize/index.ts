@@ -1,16 +1,11 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getSubscriptionPrice } from '../_shared/subscription-plans.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers":
     "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
-
-const PLAN_PRICES: Record<string, Record<string, number>> = {
-  starter:    { monthly: 500000,   yearly: 4800000 },
-  business:   { monthly: 1500000,  yearly: 14400000 },
-  enterprise: { monthly: 5000000,  yearly: 48000000 },
 };
 
 serve(async (req) => {
@@ -54,16 +49,16 @@ serve(async (req) => {
       });
     }
 
-    const planPrices = PLAN_PRICES[plan];
-    if (!planPrices) {
-      return new Response(JSON.stringify({ error: "Invalid plan" }), {
+    const price = getSubscriptionPrice(plan, billing_cycle);
+    if (price === undefined) {
+      return new Response(JSON.stringify({ error: "Invalid plan or billing cycle" }), {
         status: 400,
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
     }
 
-    const cycle = billing_cycle === 'yearly' ? 'yearly' : 'monthly';
-    const amount = planPrices[cycle];
+    const cycle = billing_cycle;
+    const amount = price * 100;
 
     const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
     if (!PAYSTACK_SECRET_KEY) {

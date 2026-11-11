@@ -680,6 +680,53 @@ export type Database = {
         }
         Relationships: []
       }
+      subscription_checkouts: {
+        Row: {
+          activated_at: string | null
+          amount: number
+          billing_cycle: string
+          created_at: string
+          id: string
+          owner_id: string
+          plan: Database["public"]["Enums"]["subscription_plan"]
+          reference: string
+          status: string
+          store_id: string
+        }
+        Insert: {
+          activated_at?: string | null
+          amount: number
+          billing_cycle: string
+          created_at?: string
+          id?: string
+          owner_id: string
+          plan: Database["public"]["Enums"]["subscription_plan"]
+          reference: string
+          status?: string
+          store_id: string
+        }
+        Update: {
+          activated_at?: string | null
+          amount?: number
+          billing_cycle?: string
+          created_at?: string
+          id?: string
+          owner_id?: string
+          plan?: Database["public"]["Enums"]["subscription_plan"]
+          reference?: string
+          status?: string
+          store_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscription_checkouts_store_id_fkey"
+            columns: ["store_id"]
+            isOneToOne: false
+            referencedRelation: "stores"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       subscriptions: {
         Row: {
           amount: number
@@ -808,6 +855,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_subscription_checkout: {
+        Args: {
+          p_amount: number
+          p_currency: string
+          p_cycle: string
+          p_owner_id: string
+          p_paid_at: string
+          p_plan: string
+          p_reference: string
+          p_store_id: string
+        }
+        Returns: Json
+      }
       add_inventory_inflow:
         | {
             Args: {
@@ -830,6 +890,15 @@ export type Database = {
             }
             Returns: string
           }
+      assign_staff_to_store: {
+        Args: {
+          p_role: Database["public"]["Enums"]["app_role"]
+          p_source_store: string
+          p_target_store: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
       complete_sale: {
         Args: {
           p_cashier_id: string
@@ -841,6 +910,11 @@ export type Database = {
         }
         Returns: string
       }
+      create_owned_store: {
+        Args: { p_address: string; p_name: string; p_phone?: string }
+        Returns: string
+      }
+      get_store_entitlement: { Args: { p_store_id: string }; Returns: Json }
       get_user_role: {
         Args: { _store_id: string; _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"]
@@ -854,6 +928,8 @@ export type Database = {
         }
         Returns: boolean
       }
+      is_store_member: { Args: { p_store_id: string }; Returns: boolean }
+      owner_entitlement: { Args: { p_owner_id: string }; Returns: Json }
       reduce_inventory: {
         Args: {
           p_product_id: string

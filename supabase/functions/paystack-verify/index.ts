@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { getSubscriptionExpiry } from '../_shared/subscription-plans.ts';
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -78,8 +79,7 @@ serve(async (req) => {
       const billingCycle = txData.metadata?.billing_cycle || 'monthly';
 
       // Calculate expiry based on billing cycle
-      const expiresAt = new Date();
-      expiresAt.setDate(expiresAt.getDate() + (billingCycle === 'yearly' ? 365 : 30));
+      const expiresAt = getSubscriptionExpiry(new Date(), billingCycle);
 
       await adminClient.from("subscriptions").update({
         status: "active",

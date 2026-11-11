@@ -4,7 +4,15 @@ export type BillingCycle = 'monthly' | 'six_months' | 'yearly';
 export const SUBSCRIPTION_PRICES = {
   starter: { monthly: 15000, six_months: 60000, yearly: 120000 },
   business: { monthly: 30000, six_months: 180000, yearly: 300000 },
+  biz_pro: { monthly: 45000, six_months: 270000, yearly: 450000 },
   enterprise: { monthly: 50000, yearly: 480000 },
+} as const;
+
+export const PLAN_LIMITS = {
+  starter: { stores: 1, staffPerStore: 0 },
+  business: { stores: 3, staffPerStore: 3 },
+  biz_pro: { stores: 5, staffPerStore: 10 },
+  enterprise: { stores: Infinity, staffPerStore: Infinity },
 } as const;
 
 export function getSubscriptionPrice(plan: string, cycle: string): number | undefined {

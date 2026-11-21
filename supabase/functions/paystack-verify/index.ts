@@ -1,12 +1,8 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { getSubscriptionExpiry } from '../_shared/subscription-plans.ts';
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { confirmPayment } from '../_shared/confirm-payment.ts';
+import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { z } from 'npm:zod@3';
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -23,8 +19,8 @@ serve(async (req) => {
     }
 
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
+      Deno.env.get("SUPABASE_URL") || "",
+      Deno.env.get("SUPABASE_ANON_KEY") || "",
       { global: { headers: { Authorization: authHeader } } }
     );
 
@@ -37,74 +33,10 @@ serve(async (req) => {
       });
     }
 
-    const { reference } = await req.json();
-
-    if (!reference) {
-      return new Response(JSON.stringify({ error: "Missing reference" }), {
-        status: 400,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
-    if (!PAYSTACK_SECRET_KEY) {
-      return new Response(JSON.stringify({ error: "Paystack not configured" }), {
-        status: 500,
-        headers: { ...corsHeaders, "Content-Type": "application/json" },
-      });
-    }
-
-    // Verify transaction with Paystack
-    const paystackRes = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      headers: {
-        Authorization: `Bearer ${PAYSTACK_SECRET_KEY}`,
-      },
-    });
-
-    const paystackData = await paystackRes.json();
-
-    if (!paystackRes.ok || !paystackData.status) {
-      throw new Error(`Paystack verify failed [${paystackRes.status}]: ${JSON.stringify(paystackData)}`);
-    }
-
-    const txData = paystackData.data;
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    if (txData.status === "success") {
-      const storeId = txData.metadata?.store_id;
-      const plan = txData.metadata?.plan;
-      const billingCycle = txData.metadata?.billing_cycle || 'monthly';
-
-      // Calculate expiry based on billing cycle
-      const expiresAt = getSubscriptionExpiry(new Date(), billingCycle);
-
-      await adminClient.from("subscriptions").update({
-        status: "active",
-        plan,
-        started_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString(),
-        updated_at: new Date().toISOString(),
-      }).eq("paystack_reference", reference);
-
-      return new Response(
-        JSON.stringify({ success: true, status: "active", plan, expires_at: expiresAt.toISOString() }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    } else {
-      return new Response(
-        JSON.stringify({ success: false, status: txData.status }),
-        {
-          status: 200,
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        }
-      );
-    }
+    const parsed = z.object({ reference: z.string().min(1).max(200).regex(/^[a-zA-Z0-9_.=-]+$/) }).safeParse(await req.json());
+    if (!parsed.success) return new Response(JSON.stringify({ error: 'Invalid payment reference' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const result = await confirmPayment(parsed.data.reference, String(claimsData.claims.sub));
+    return new Response(JSON.stringify(result), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   } catch (error) {
     console.error("Error verifying payment:", error);
     const msg = error instanceof Error ? error.message : "Unknown error";

@@ -387,7 +387,7 @@ export default function LandingPage() {
             <motion.p variants={fadeUp} custom={1} className="mt-4 text-lg text-landing-muted">No hidden fees. Cancel anytime.</motion.p>
           </motion.div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-4xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-4xl mx-auto">
             {[
               {
                 name: 'Starter', price: `₦${SUBSCRIPTION_PRICES.starter.monthly.toLocaleString('en-NG')}`, period: '/month',
@@ -400,8 +400,15 @@ export default function LandingPage() {
                 name: 'Business', price: `₦${SUBSCRIPTION_PRICES.business.monthly.toLocaleString('en-NG')}`, period: '/month',
                 longerTerms: `6 months: ₦${SUBSCRIPTION_PRICES.business.six_months.toLocaleString('en-NG')} · Yearly: ₦${SUBSCRIPTION_PRICES.business.yearly.toLocaleString('en-NG')}`,
                 desc: 'For growing wholesale businesses',
-                features: ['1 Store', 'Unlimited Staff', 'Full Analytics', 'Inventory Management', 'Priority Support', 'Export Reports'],
+                features: ['3 Stores', '3 Staff per Store', 'Full Analytics', 'Inventory Management', 'Priority Support', 'Export Reports'],
                 popular: true,
+              },
+              {
+                name: 'Biz Pro', price: `₦${SUBSCRIPTION_PRICES.biz_pro.monthly.toLocaleString('en-NG')}`, period: '/month',
+                longerTerms: `6 months: ₦${SUBSCRIPTION_PRICES.biz_pro.six_months.toLocaleString('en-NG')} · Yearly: ₦${SUBSCRIPTION_PRICES.biz_pro.yearly.toLocaleString('en-NG')}`,
+                desc: 'For expanding multi-store businesses',
+                features: ['5 Stores', '10 Staff per Store', 'Full Analytics', 'Inventory Management', 'Priority Support', 'Export Reports'],
+                popular: false,
               },
               {
                 name: 'Enterprise', price: 'Custom', period: '',

@@ -1,12 +1,9 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { getSubscriptionPrice } from '../_shared/subscription-plans.ts';
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
-};
+import { allowedCallback } from '../_shared/payment-validation.ts';
+import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
+import { z } from 'npm:zod@3';
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -23,8 +20,8 @@ serve(async (req) => {
     }
 
     const supabase = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_ANON_KEY")!,
+      Deno.env.get("SUPABASE_URL") || "",
+      Deno.env.get("SUPABASE_ANON_KEY") || "",
       { global: { headers: { Authorization: authHeader } } }
     );
 
@@ -40,7 +37,12 @@ serve(async (req) => {
     const userId = claimsData.claims.sub;
     const userEmail = claimsData.claims.email;
 
-    const { plan, store_id, callback_url, billing_cycle = 'monthly' } = await req.json();
+    const parsed = z.object({ plan: z.enum(['starter','business','biz_pro','enterprise']), store_id: z.string().uuid(), callback_url: z.string().url(), billing_cycle: z.enum(['monthly','six_months','yearly']).default('monthly') }).safeParse(await req.json());
+    if (!parsed.success) return new Response(JSON.stringify({ error: 'Invalid subscription details' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { plan, store_id, callback_url, billing_cycle } = parsed.data;
+    if (!allowedCallback(callback_url)) return new Response(JSON.stringify({ error: 'Invalid payment return address' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { data: store } = await supabase.from('stores').select('owner_id').eq('id', store_id).maybeSingle();
+    if (!store || store.owner_id !== userId) return new Response(JSON.stringify({ error: 'Only owners can pay for their stores' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     if (!plan || !store_id || !callback_url) {
       return new Response(JSON.stringify({ error: "Missing required fields: plan, store_id, callback_url" }), {
@@ -68,7 +70,10 @@ serve(async (req) => {
       });
     }
 
-    const reference = `lantid_${store_id.slice(0, 8)}_${Date.now()}`;
+    const reference = `lantid-${crypto.randomUUID()}`;
+    const adminClient = createClient(Deno.env.get('SUPABASE_URL') || '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '');
+    const { error: checkoutError } = await adminClient.from('subscription_checkouts').insert({ store_id, owner_id: userId, plan, billing_cycle: cycle, amount, reference });
+    if (checkoutError) throw checkoutError;
 
     // Initialize Paystack transaction
     const paystackRes = await fetch("https://api.paystack.co/transaction/initialize", {
@@ -80,6 +85,7 @@ serve(async (req) => {
       body: JSON.stringify({
         email: userEmail,
         amount,
+        currency: "NGN",
         reference,
         callback_url,
         metadata: {
@@ -96,21 +102,6 @@ serve(async (req) => {
     if (!paystackRes.ok || !paystackData.status) {
       throw new Error(`Paystack init failed [${paystackRes.status}]: ${JSON.stringify(paystackData)}`);
     }
-
-    // Create pending subscription record
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    await adminClient.from("subscriptions").upsert({
-      store_id,
-      plan,
-      status: "pending",
-      paystack_reference: reference,
-      amount,
-      currency: "NGN",
-    }, { onConflict: "store_id" });
 
     return new Response(
       JSON.stringify({

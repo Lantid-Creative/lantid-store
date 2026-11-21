@@ -7,6 +7,7 @@ import { PageTransition } from '@/components/PageTransition';
 import { AlertTriangle, X, LayoutDashboard, ShoppingCart, Package, History, Users } from 'lucide-react';
 import { useState, useEffect } from 'react';
 import { useOnboarding } from '@/contexts/OnboardingContext';
+import { StoreSwitcher } from '@/components/StoreSwitcher';
 
 const mobileNavItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'page:dashboard' as Permission },
@@ -17,7 +18,7 @@ const mobileNavItems = [
 ];
 
 export default function AppLayout() {
-  const { isTrialing, trialEndsAt, role } = useAuth();
+  const { isTrialing, trialEndsAt, role, storeId } = useAuth();
   const { hasPermission } = usePermissions();
   const navigate = useNavigate();
   const location = useLocation();
@@ -52,6 +53,7 @@ export default function AppLayout() {
     <div className="flex h-screen w-full bg-background overflow-hidden">
       {!isMobile && <AppSidebarNav />}
       <div className="flex-1 overflow-hidden flex flex-col">
+        {isMobile && <StoreSwitcher />}
         {showBanner && (
           <div className="bg-destructive/10 border-b border-destructive/20 px-4 py-2.5 flex items-center justify-between shrink-0">
             <div className="flex items-center gap-2 text-sm">
@@ -76,7 +78,7 @@ export default function AppLayout() {
           </div>
         )}
         <div className="flex-1 overflow-hidden">
-          <PageTransition key={location.pathname}>
+          <PageTransition key={`${storeId}:${location.pathname}`}>
             <Outlet />
           </PageTransition>
         </div>

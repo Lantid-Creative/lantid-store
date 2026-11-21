@@ -1,10 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-
-const corsHeaders = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
-};
+import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
+import { z } from "npm:zod@3";
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -12,8 +9,9 @@ serve(async (req) => {
   }
 
   try {
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
+    if (!supabaseUrl || !serviceRoleKey) throw new Error('Staff service not configured');
     const supabaseAdmin = createClient(supabaseUrl, serviceRoleKey);
 
     // Verify the calling user is authenticated and is an owner
@@ -35,7 +33,10 @@ serve(async (req) => {
       });
     }
 
-    const body = await req.json();
+    const schema = z.object({ email: z.string().email().max(255).optional(), full_name: z.string().trim().min(1).max(100), role: z.enum(['cashier','manager']), store_id: z.string().uuid(), action: z.enum(['update']).optional(), user_id: z.string().uuid().optional(), role_id: z.string().uuid().optional() });
+    const parsed = schema.safeParse(await req.json());
+    if (!parsed.success) return new Response(JSON.stringify({ error: 'Invalid staff details' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const body = parsed.data;
     const { email, full_name, role, store_id, action, user_id, role_id } = body;
 
     // Verify caller is owner of this store
@@ -60,6 +61,8 @@ serve(async (req) => {
         });
       }
 
+      const { data: target } = await supabaseAdmin.from('user_roles').select('role').eq('id', role_id).eq('store_id', store_id).eq('user_id', user_id).maybeSingle();
+      if (!target || target.role === 'owner') throw new Error('Staff member not found in this store');
       // Update profile name
       await supabaseAdmin
         .from('profiles')
@@ -84,36 +87,21 @@ serve(async (req) => {
       });
     }
 
-    // Check if owner has lifetime access
-    const { data: ownerProfile } = await supabaseAdmin
-      .from('profiles')
-      .select('lifetime_access')
-      .eq('user_id', callingUser.id)
-      .single();
-
-    const hasLifetimeAccess = ownerProfile?.lifetime_access === true;
-
-    // Check subscription plan — Starter plan cannot add staff (unless lifetime access)
-    if (!hasLifetimeAccess) {
-      const { data: activeSub } = await supabaseAdmin
-        .from('subscriptions')
-        .select('plan')
-        .eq('store_id', store_id)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle();
-
-      // If no active subscription or on starter plan, block staff creation
-      if (!activeSub || activeSub.plan === 'starter') {
-        return new Response(JSON.stringify({ error: 'Starter plan does not allow adding staff. Please upgrade to Business or Enterprise.' }), {
-          status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
-        });
-      }
-    }
+    if (!email) return new Response(JSON.stringify({ error: 'Email is required' }), { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
+    const { data: entitlement, error: entitlementError } = await supabaseAdmin.rpc('owner_entitlement', { p_owner_id: callingUser.id });
+    if (entitlementError) throw entitlementError;
+    const { count, error: countError } = await supabaseAdmin.from('user_roles').select('id', { count: 'exact', head: true }).eq('store_id', store_id).neq('role', 'owner');
+    if (countError) throw countError;
+    if (!entitlement.active || (count ?? 0) >= entitlement.staff) return new Response(JSON.stringify({ error: 'Staff limit reached for this store. Upgrade your plan to add staff.' }), { status: 403, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 
     // Check if user already exists
-    const { data: existingUsers } = await supabaseAdmin.auth.admin.listUsers();
-    const existingUser = existingUsers?.users?.find((u: any) => u.email === email.toLowerCase());
+    let existingUser;
+    for (let page = 1; ; page++) {
+      const { data, error } = await supabaseAdmin.auth.admin.listUsers({ page, perPage: 1000 });
+      if (error) throw error;
+      existingUser = data.users.find(u => u.email?.toLowerCase() === email.toLowerCase());
+      if (existingUser || data.users.length < 1000) break;
+    }
 
     let userId: string;
 
@@ -135,12 +123,7 @@ serve(async (req) => {
       }
     } else {
       // Create the user account
-      const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.createUser({
-        email,
-        password: 'TempPass123!',
-        email_confirm: true,
-        user_metadata: { full_name }
-      });
+      const { data: newUser, error: createError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, { data: { full_name }, redirectTo: `${new URL(req.headers.get('Origin') || 'https://lantid.store').origin}/profile` });
 
       if (createError) {
         return new Response(JSON.stringify({ error: createError.message }), {
@@ -150,13 +133,11 @@ serve(async (req) => {
       userId = newUser.user.id;
     }
 
-    // Upsert profile
-    await supabaseAdmin
-      .from('profiles')
-      .upsert(
-        { user_id: userId, full_name, store_id },
-        { onConflict: 'user_id' }
-      );
+    // Existing memberships and profile details must not be overwritten when adding another store.
+    if (!existingUser) {
+      const { error } = await supabaseAdmin.from('profiles').update({ full_name, store_id }).eq('user_id', userId);
+      if (error) throw error;
+    }
 
     // Assign role
     const { error: roleError } = await supabaseAdmin
@@ -174,13 +155,13 @@ serve(async (req) => {
       user: { id: userId, email, full_name, role },
       message: existingUser 
         ? `Existing user added as ${role}. They can log in with their current password.`
-        : `Staff account created. Temporary password: TempPass123!`
+        : `Staff invitation sent. They can set their own password from the email.`
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
 
   } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), {
+    return new Response(JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), {
       status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' }
     });
   }

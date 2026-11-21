@@ -5,6 +5,7 @@ import { LayoutDashboard, ShoppingCart, Package, History, LogOut, ChevronLeft, C
 import { useState } from 'react';
 import { useTheme } from '@/hooks/useTheme';
 import { OnboardingChecklist } from '@/components/OnboardingChecklist';
+import { StoreSwitcher } from '@/components/StoreSwitcher';
 
 const allNavItems = [
   { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, permission: 'page:dashboard' as Permission, tourId: 'nav-dashboard' },
@@ -64,7 +65,8 @@ export function AppSidebarNav() {
         </button>
       </div>
 
-      <nav className="flex-1 py-2 space-y-0.5 px-2">
+      {!collapsed && <StoreSwitcher />}
+      <nav className="flex-1 py-2 space-y-0.5 px-2 overflow-y-auto">
         {navItems.map((item) => {
           const isActive = location.pathname === item.path;
           return (

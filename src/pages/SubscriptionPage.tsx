@@ -19,8 +19,15 @@ const plans = [
     id: 'business',
     name: 'Business',
     icon: Crown,
-    features: ['1 Store', 'Unlimited Products', '10 Staff Accounts', 'Advanced Reports', 'Priority Support', 'Inventory Alerts'],
+    features: ['3 Stores', 'Unlimited Products', '3 Staff per Store', 'Advanced Reports', 'Priority Support', 'Inventory Alerts'],
     popular: true,
+  },
+  {
+    id: 'biz_pro',
+    name: 'Biz Pro',
+    icon: Crown,
+    features: ['5 Stores', 'Unlimited Products', '10 Staff per Store', 'Advanced Reports', 'Priority Support', 'Inventory Alerts'],
+    popular: false,
   },
   {
     id: 'enterprise',
@@ -32,7 +39,7 @@ const plans = [
 ];
 
 export default function SubscriptionPage() {
-  const { storeId, user, refetchSubscription } = useAuth();
+  const { storeId, user, refetchSubscription, entitlement } = useAuth();
   const [loadingPlan, setLoadingPlan] = useState<string | null>(null);
   const [billingCycle, setBillingCycle] = useState<BillingCycle>('monthly');
 
@@ -117,8 +124,8 @@ export default function SubscriptionPage() {
     }
   };
 
-  const isActive = subscription?.status === 'active';
-  const currentPlan = subscription?.plan;
+  const isActive = !!entitlement?.active && !entitlement?.is_trialing;
+  const currentPlan = isActive ? entitlement?.plan : subscription?.plan;
   const expiresAt = subscription?.expires_at ? new Date(subscription.expires_at) : null;
 
   return (
@@ -149,7 +156,7 @@ export default function SubscriptionPage() {
                 <div className="flex items-center gap-2">
                   <div className={`h-2.5 w-2.5 rounded-full ${isActive ? 'bg-green-500' : 'bg-destructive'}`} />
                   <span className="font-semibold text-foreground capitalize">
-                    {currentPlan} Plan — {isActive ? 'Active' : subscription.status}
+                    {currentPlan === 'biz_pro' ? 'Biz Pro' : currentPlan} Plan — {isActive ? 'Active' : subscription.status}
                   </span>
                 </div>
                 {expiresAt && (
@@ -163,7 +170,7 @@ export default function SubscriptionPage() {
         )}
 
         {/* Plans Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-5">
           {plans.map((plan) => {
             const isCurrent = isActive && currentPlan === plan.id;
             const price = getSubscriptionPrice(plan.id, billingCycle);
@@ -221,7 +228,7 @@ export default function SubscriptionPage() {
 
                 <Button
                   onClick={() => handleSubscribe(plan.id)}
-                  disabled={isCurrent || !!loadingPlan || price === undefined}
+                  disabled={!!loadingPlan || price === undefined}
                   className={`w-full py-2.5 rounded-lg text-sm font-semibold transition-all flex items-center justify-center gap-2 ${
                     isCurrent
                       ? 'bg-primary/10 text-primary cursor-default'
@@ -235,7 +242,7 @@ export default function SubscriptionPage() {
                   ) : price === undefined ? (
                     'Unavailable for 6 months'
                   ) : isCurrent ? (
-                    'Current Plan'
+                    'Renew Plan'
                   ) : (
                     <>
                       Subscribe <ExternalLink className="h-3.5 w-3.5" />

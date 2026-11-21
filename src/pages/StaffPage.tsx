@@ -6,11 +6,14 @@ import { UserPlus, Users, Trash2, Shield, Settings, Lock, Pencil } from 'lucide-
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import RolePermissionsEditor from '@/components/RolePermissionsEditor';
+import { Button } from '@/components/ui/button';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { FunctionsHttpError } from '@supabase/supabase-js';
 
 type AppRole = 'cashier' | 'manager';
 
 export default function StaffPage() {
-  const { storeId, profile, user } = useAuth();
+  const { storeId, entitlement, stores } = useAuth();
   const queryClient = useQueryClient();
   const [showAdd, setShowAdd] = useState(false);
   const [activeTab, setActiveTab] = useState<'staff' | 'permissions'>('staff');
@@ -24,6 +27,7 @@ export default function StaffPage() {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState<AppRole>('cashier');
   const [saving, setSaving] = useState(false);
+  const [targetStore, setTargetStore] = useState('');
 
   const { data: staff = [], isLoading } = useQuery({
     queryKey: ['staff', storeId],
@@ -52,25 +56,9 @@ export default function StaffPage() {
     enabled: !!storeId,
   });
 
-  // Check current subscription plan
-  const { data: subscription } = useQuery({
-    queryKey: ['subscription-plan', storeId],
-    queryFn: async () => {
-      if (!storeId) return null;
-      const { data } = await supabase
-        .from('subscriptions')
-        .select('plan, status')
-        .eq('store_id', storeId)
-        .eq('status', 'active')
-        .limit(1)
-        .maybeSingle();
-      return data;
-    },
-    enabled: !!storeId,
-  });
-
-  // During trial (no subscription), allow staff creation. Only block on active starter plan.
-  const isStarterPlan = !profile?.lifetime_access && subscription?.plan === 'starter';
+  const staffLimit = entitlement?.staff ?? 0;
+  const isStarterPlan = staffLimit === 0;
+  const staffCount = staff.filter(member => member.role !== 'owner').length;
 
   const handleAddStaff = async () => {
     if (!email || !fullName || !storeId) return;
@@ -79,7 +67,10 @@ export default function StaffPage() {
       const { data, error } = await supabase.functions.invoke('create-staff', {
         body: { email, full_name: fullName, role, store_id: storeId },
       });
-      if (error) throw error;
+      if (error) {
+        if (error instanceof FunctionsHttpError) { const details = await error.context.json(); throw new Error(details.error || error.message); }
+        throw error;
+      }
       if (data?.error) throw new Error(data.error);
       toast.success(data?.message || 'Staff created!');
       setShowAdd(false);
@@ -110,6 +101,7 @@ export default function StaffPage() {
     setEditingStaff(staffMember);
     setEditName(staffMember.full_name);
     setEditRole(staffMember.role as AppRole);
+    setTargetStore('');
   };
 
   const handleSaveEdit = async () => {
@@ -129,6 +121,10 @@ export default function StaffPage() {
       });
       if (fnError) throw fnError;
       if (data?.error) throw new Error(data.error);
+      if (targetStore) {
+        const { error } = await supabase.rpc('assign_staff_to_store', { p_user_id: editingStaff.user_id, p_source_store: storeId, p_target_store: targetStore, p_role: editRole });
+        if (error) throw error;
+      }
       toast.success('Staff updated!');
       setEditingStaff(null);
       queryClient.invalidateQueries({ queryKey: ['staff'] });
@@ -153,19 +149,21 @@ export default function StaffPage() {
         <div>
           <h1 className="text-2xl font-bold text-foreground">Staff Management</h1>
           <p className="text-sm text-muted-foreground">Manage staff accounts and role permissions</p>
+          <p className="text-xs text-muted-foreground mt-1">{staffCount} / {staffLimit > 100000 ? 'Unlimited' : staffLimit} staff in this store</p>
         </div>
         {isStarterPlan ? (
           <div className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-muted text-muted-foreground text-sm font-medium cursor-not-allowed">
             <Lock className="h-4 w-4" /> Upgrade to Add Staff
           </div>
         ) : (
-          <button
+          <Button
             id="tour-add-staff-btn"
+            disabled={staffCount >= staffLimit}
             onClick={() => setShowAdd(true)}
             className="flex items-center gap-2 px-4 py-2.5 rounded-lg bg-primary text-primary-foreground font-semibold text-sm hover:opacity-90 active:scale-[0.98] transition-all"
           >
             <UserPlus className="h-4 w-4" /> Add Staff
-          </button>
+          </Button>
         )}
       </div>
 
@@ -325,9 +323,7 @@ export default function StaffPage() {
             >
               {submitting ? 'Creating...' : 'Create Staff Account'}
             </button>
-            <p className="text-xs text-muted-foreground text-center">
-              Staff will use temporary password: <code className="font-mono-numbers bg-muted px-1 rounded">TempPass123!</code>
-            </p>
+            <p className="text-xs text-muted-foreground text-center">New staff receive an email invitation to set their password. Existing staff keep their current password.</p>
           </div>
         </DialogContent>
       </Dialog>
@@ -366,13 +362,20 @@ export default function StaffPage() {
                 ))}
               </div>
             </div>
-            <button
+            {stores.filter(store => store.role === 'owner' && store.id !== storeId).length > 0 && <div className="space-y-2">
+              <label className="block text-sm font-medium">Also assign to another store</label>
+              <Select value={targetStore} onValueChange={setTargetStore}>
+                <SelectTrigger aria-label="Assign staff to store"><SelectValue placeholder="Choose another store (optional)" /></SelectTrigger>
+                <SelectContent>{stores.filter(store => store.role === 'owner' && store.id !== storeId).map(store => <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>)}</SelectContent>
+              </Select>
+            </div>}
+            <Button
               onClick={handleSaveEdit}
               disabled={saving || !editName.trim()}
               className="w-full py-2.5 rounded-lg bg-primary text-primary-foreground font-bold text-sm hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-40"
             >
               {saving ? 'Saving...' : 'Save Changes'}
-            </button>
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

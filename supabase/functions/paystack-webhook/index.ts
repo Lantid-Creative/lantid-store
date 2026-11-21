@@ -1,13 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { createHmac } from "node:crypto";
-import { getSubscriptionExpiry } from '../_shared/subscription-plans.ts';
-
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type, x-paystack-signature",
-};
+import { confirmPayment } from '../_shared/confirm-payment.ts';
+import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors';
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -17,7 +11,7 @@ serve(async (req) => {
   try {
     const PAYSTACK_SECRET_KEY = Deno.env.get("PAYSTACK_SECRET_KEY");
     if (!PAYSTACK_SECRET_KEY) {
-      return new Response("Not configured", { status: 500 });
+      return new Response("Not configured", { status: 500, headers: corsHeaders });
     }
 
     const body = await req.text();
@@ -28,43 +22,20 @@ serve(async (req) => {
 
     if (signature !== hash) {
       console.error("Invalid Paystack webhook signature");
-      return new Response("Invalid signature", { status: 401 });
+      return new Response("Invalid signature", { status: 401, headers: corsHeaders });
     }
 
     const event = JSON.parse(body);
-    const adminClient = createClient(
-      Deno.env.get("SUPABASE_URL")!,
-      Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
-    );
-
-    if (event.event === "charge.success") {
-      const data = event.data;
-      const storeId = data.metadata?.store_id;
-      const plan = data.metadata?.plan;
-      const reference = data.reference;
-
-      if (storeId && plan) {
-        const billingCycle = data.metadata?.billing_cycle || 'monthly';
-        const expiresAt = getSubscriptionExpiry(new Date(), billingCycle);
-
-        await adminClient.from("subscriptions").update({
-          status: "active",
-          plan,
-          started_at: new Date().toISOString(),
-          expires_at: expiresAt.toISOString(),
-          updated_at: new Date().toISOString(),
-        }).eq("paystack_reference", reference);
-
-        console.log(`Subscription activated for store ${storeId}, plan: ${plan}`);
-      }
+    if (event.event === 'charge.success' && typeof event.data?.reference === 'string') {
+      await confirmPayment(event.data.reference);
     }
 
     return new Response(JSON.stringify({ received: true }), {
       status: 200,
-      headers: { "Content-Type": "application/json" },
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
     });
   } catch (error) {
     console.error("Webhook error:", error);
-    return new Response("Server error", { status: 500 });
+    return new Response("Server error", { status: 500, headers: corsHeaders });
   }
 });

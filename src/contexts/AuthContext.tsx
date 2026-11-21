@@ -1,14 +1,21 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import type { User } from '@supabase/supabase-js';
+import { useQueryClient } from '@tanstack/react-query';
 
 type AppRole = 'owner' | 'manager' | 'cashier';
+type StoreMembership = { id: string; name: string; role: AppRole };
+type Entitlement = { active: boolean; plan: string; stores: number; staff: number; is_trialing?: boolean; trial_ends_at?: string; expires_at?: string };
 
 interface AuthContextType {
   user: User | null;
   profile: { full_name: string; store_id: string | null; lifetime_access: boolean } | null;
   role: AppRole | null;
   storeId: string | null;
+  stores: StoreMembership[];
+  entitlement: Entitlement | null;
+  switchStore: (id: string) => Promise<void>;
+  refreshStores: (preferredId?: string) => Promise<void>;
   loading: boolean;
   subscriptionActive: boolean;
   trialEndsAt: Date | null;
@@ -23,6 +30,9 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const queryClient = useQueryClient();
+  const [stores, setStores] = useState<StoreMembership[]>([]);
+  const [entitlement, setEntitlement] = useState<Entitlement | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<{ full_name: string; store_id: string | null; lifetime_access: boolean } | null>(null);
   const [role, setRole] = useState<AppRole | null>(null);
@@ -33,50 +43,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [isTrialing, setIsTrialing] = useState(false);
 
   const checkSubscriptionStatus = async (stId: string, hasLifetimeAccess: boolean) => {
-    // Lifetime access bypasses all checks
-    if (hasLifetimeAccess) {
-      setSubscriptionActive(true);
-      setIsTrialing(false);
-      return;
-    }
-
-    // Check subscription
-    const { data: sub } = await supabase
-      .from('subscriptions')
-      .select('status')
-      .eq('store_id', stId)
-      .eq('status', 'active')
-      .limit(1)
-      .maybeSingle();
-
-    if (sub) {
-      setSubscriptionActive(true);
-      setIsTrialing(false);
-      return;
-    }
-
-    // Check trial
-    const { data: store } = await supabase
-      .from('stores')
-      .select('trial_ends_at')
-      .eq('id', stId)
-      .single();
-
-    if (store?.trial_ends_at) {
-      const trialEnd = new Date(store.trial_ends_at);
-      setTrialEndsAt(trialEnd);
-      const now = new Date();
-      if (trialEnd > now) {
-        setIsTrialing(true);
-        setSubscriptionActive(true);
-      } else {
-        setIsTrialing(false);
-        setSubscriptionActive(false);
-      }
-    } else {
-      setSubscriptionActive(false);
-      setIsTrialing(false);
-    }
+    const { data, error } = await supabase.rpc('get_store_entitlement', { p_store_id: stId });
+    if (error) throw error;
+    const access = data as unknown as Entitlement;
+    setEntitlement(access);
+    setSubscriptionActive(access.active || hasLifetimeAccess);
+    setIsTrialing(!!access.is_trialing && !hasLifetimeAccess);
+    setTrialEndsAt(access.trial_ends_at ? new Date(access.trial_ends_at) : null);
   };
 
   const refetchSubscription = async () => {
@@ -107,24 +80,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setProfile(profileData);
     }
 
-    // Get role
-    const { data: roleData } = await supabase
+    const { data: roleRows, error: rolesError } = await supabase
       .from('user_roles')
       .select('role, store_id')
-      .eq('user_id', userId)
-      .limit(1)
-      .maybeSingle();
-
-    if (roleData) {
-      setRole(roleData.role as AppRole);
-      setStoreId(roleData.store_id);
-      await checkSubscriptionStatus(roleData.store_id, profileData?.lifetime_access ?? false);
+      .eq('user_id', userId);
+    if (rolesError) throw rolesError;
+    const ids = (roleRows ?? []).map(row => row.store_id);
+    const { data: storeRows, error: storesError } = ids.length ? await supabase.from('stores').select('id, name').in('id', ids) : { data: [], error: null };
+    if (storesError) throw storesError;
+    const memberships: StoreMembership[] = (storeRows ?? []).flatMap(store => {
+      const membership = roleRows?.find(row => row.store_id === store.id);
+      return membership ? [{ ...store, role: membership.role as AppRole }] : [];
+    });
+    setStores(memberships);
+    const selected = memberships.find(store => store.id === profileData?.store_id) ?? memberships[0];
+    if (selected) {
+      setRole(selected.role);
+      setStoreId(selected.id);
+      await checkSubscriptionStatus(selected.id, profileData?.lifetime_access ?? false);
     } else {
       setRole(null);
       setStoreId(null);
       setSubscriptionActive(false);
       setIsTrialing(false);
     }
+  };
+
+  const switchStore = async (id: string) => {
+    const selected = stores.find(store => store.id === id);
+    if (!selected || !user || id === storeId) return;
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('profiles').update({ store_id: id }).eq('user_id', user.id);
+      if (error) throw error;
+      await queryClient.cancelQueries();
+      queryClient.clear();
+      setStoreId(id); setRole(selected.role);
+      setProfile(previous => previous ? { ...previous, store_id: id } : previous);
+      await checkSubscriptionStatus(id, profile?.lifetime_access ?? false);
+    } finally { setLoading(false); }
+  };
+  const refreshStores = async (_preferredId?: string) => {
+    if (!user) return;
+    setLoading(true);
+    try { await queryClient.cancelQueries(); queryClient.clear(); await fetchUserData(user.id); }
+    finally { setLoading(false); }
   };
 
   useEffect(() => {
@@ -140,6 +140,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setProfile(null);
         setRole(null);
         setStoreId(null);
+        setStores([]);
+        setEntitlement(null);
+        queryClient.clear();
         setSubscriptionActive(false);
         setIsTrialing(false);
         setTrialEndsAt(null);
@@ -156,6 +159,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       try {
         await fetchUserData(sessionUser.id);
+      } catch (error) {
+        console.error('Could not load account:', error);
+        setSubscriptionActive(false);
       } finally {
         if (mounted) setLoading(false);
       }
@@ -213,7 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{
-      user, profile, role, storeId, loading,
+      user, profile, role, storeId, loading, stores, entitlement, switchStore, refreshStores,
       subscriptionActive, trialEndsAt, isTrialing,
       signIn, signUp, signOut, refetchSubscription, refetchProfile
     }}>

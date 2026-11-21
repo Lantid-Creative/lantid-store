@@ -22,36 +22,8 @@ export default function StoreSetupPage() {
     setSubmitting(true);
 
     try {
-      // Create store
-      const { data: store, error: storeError } = await supabase
-        .from('stores')
-        .insert({
-          name: storeName.trim(),
-          address: address.trim(),
-          phone: storePhone.trim() || null,
-          owner_id: user.id,
-          printer_type: '58mm',
-        })
-        .select()
-        .single();
-
-      if (storeError) throw storeError;
-
-      // Assign owner role
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({ user_id: user.id, store_id: store.id, role: 'owner' as const });
-
-      if (roleError) throw roleError;
-
-      // Update profile with store_id
-      await supabase
-        .from('profiles')
-        .update({ store_id: store.id })
-        .eq('user_id', user.id);
-
-      // Seed default role permissions
-      await supabase.rpc('seed_role_permissions', { p_store_id: store.id });
+      const { error } = await supabase.rpc('create_owned_store', { p_name: storeName.trim(), p_address: address.trim(), p_phone: storePhone.trim() });
+      if (error) throw error;
 
       toast.success('Store created successfully!');
       window.location.href = '/dashboard';
